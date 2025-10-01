@@ -1,0 +1,15 @@
+# secrets & local env
+client_secret*.json
+service_account_key*.json
+.env
+*.pem
+
+# python
+__pycache__/
+*.pyc
+
+# streamlit
+.streamlit/secrets.toml
+
+# editors
+.vscode/
