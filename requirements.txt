@@ -1,8 +1,8 @@
 streamlit
 huggingface_hub
 google-api-python-client
-google-auth-oauthlib
 google-auth
-pypdf2
+google-auth-oauthlib
+google-auth-httplib2
+PyPDF2
 python-docx
-python-dotenv

@@ -1,15 +1,14 @@
-# secrets & local env
-client_secret*.json
-service_account_key*.json
-.env
-*.pem
+# Streamlit secrets
+.streamlit/secrets.toml
 
-# python
+# Google OAuth tokens
+client_secret.json
+token.json
+credentials.json
+
+# Python
 __pycache__/
 *.pyc
 
-# streamlit
-.streamlit/secrets.toml
-
-# editors
-.vscode/
+# Environment
+.env

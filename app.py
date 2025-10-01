@@ -1,31 +1,26 @@
 import os
 import io
 import re
+import json
+import pickle
 import streamlit as st
 import PyPDF2
 from docx import Document
-from huggingface_hub import InferenceClient, login
+from huggingface_hub import InferenceClient
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
-from google_auth_oauthlib.flow import InstalledAppFlow
-import google.auth
+from google_auth_oauthlib.flow import Flow
+from google.oauth2.credentials import Credentials
 
-# =====================
-# CONFIG & AUTH
-# =====================
+# -------------------- CONFIG --------------------
 SCOPES = ["https://www.googleapis.com/auth/drive.readonly"]
 
-# Hugging Face login (read token from secrets/environment)
-HF_TOKEN = os.getenv("HF_TOKEN", None)
-if HF_TOKEN:
-    login(token=HF_TOKEN)
-else:
-    st.error("❌ Missing Hugging Face token. Please set HF_TOKEN in Streamlit secrets or env vars.")
+HF_TOKEN = st.secrets["HF_TOKEN"]
+client_id = st.secrets["google_oauth"]["client_id"]
+client_secret = st.secrets["google_oauth"]["client_secret"]
+redirect_uri = st.secrets["google_oauth"]["redirect_uri"]
 
-# =====================
-# DRIVE UTILS
-# =====================
-
+# Allowed file types
 ALLOWED_MIMES = [
     "application/pdf",
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -35,6 +30,44 @@ ALLOWED_MIMES = [
     "application/vnd.google-apps.spreadsheet",
 ]
 
+# -------------------- AUTH --------------------
+def authenticate_drive():
+    """OAuth authentication flow for Streamlit Cloud"""
+    creds = None
+
+    if "credentials" in st.session_state:
+        creds_info = st.session_state["credentials"]
+        creds = Credentials.from_authorized_user_info(creds_info, SCOPES)
+
+    if not creds or not creds.valid:
+        flow = Flow.from_client_config(
+            {
+                "web": {
+                    "client_id": client_id,
+                    "client_secret": client_secret,
+                    "redirect_uris": [redirect_uri],
+                    "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+                    "token_uri": "https://oauth2.googleapis.com/token",
+                }
+            },
+            scopes=SCOPES,
+            redirect_uri=redirect_uri,
+        )
+
+        if "code" not in st.query_params:
+            auth_url, _ = flow.authorization_url(prompt="consent")
+            st.markdown(f"[🔐 Sign in with Google Drive]({auth_url})")
+            return None
+
+        else:
+            code = st.query_params["code"]
+            flow.fetch_token(code=code)
+            creds = flow.credentials
+            st.session_state["credentials"] = json.loads(creds.to_json())
+
+    return build("drive", "v3", credentials=creds)
+
+# -------------------- HELPERS --------------------
 def sanitize_for_drive(q: str) -> str:
     q = q.replace("'", " ").replace('"', " ").replace("\\", " ")
     q = re.sub(r"[^0-9A-Za-z\s]", " ", q)
@@ -98,9 +131,7 @@ def search_drive(query, drive_service, max_results=5):
         st.error(f"Drive search error: {e}")
         return []
 
-# =====================
-# CHAT AGENT
-# =====================
+# -------------------- CHATBOT AGENT --------------------
 class DriveChatAgent:
     def __init__(self, model="meta-llama/Meta-Llama-3-8B-Instruct"):
         self.client = InferenceClient(model, token=HF_TOKEN)
@@ -136,32 +167,21 @@ class DriveChatAgent:
 
         return response.choices[0].message["content"].strip()
 
-# =====================
-# STREAMLIT UI
-# =====================
+# -------------------- STREAMLIT UI --------------------
 st.title("📂 Google Drive + Hugging Face Chatbot")
-
 st.write("Ask a question and I will search your Google Drive for answers.")
 
-query = st.text_input("Enter your question:")
+drive_service = authenticate_drive()
 
-if st.button("Search & Answer"):
-    if not query.strip():
-        st.warning("Please enter a question first.")
-    else:
-        try:
-            # Google Auth flow
-            flow = InstalledAppFlow.from_client_secrets_file("cred.json", SCOPES)
-            creds = flow.run_local_server(port=0)
-            drive_service = build("drive", "v3", credentials=creds)
+if drive_service:
+    query = st.text_input("Enter your question:")
 
-            st.info("✅ Authenticated with Google Drive")
-
+    if st.button("Search & Answer"):
+        if not query.strip():
+            st.warning("Please enter a question first.")
+        else:
             agent = DriveChatAgent()
             answer = agent.answer_question(query, drive_service)
 
             st.subheader("Answer:")
             st.write(answer)
-
-        except Exception as e:
-            st.error(f"❌ Error: {e}")
